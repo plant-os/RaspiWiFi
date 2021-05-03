@@ -1,12 +1,35 @@
+from werkzeug.serving import make_server
 from flask import Flask, render_template, request, redirect
 import subprocess
 import os
 import time
-from threading import Thread
+import threading
 import fileinput
+from access_point_manager import AccessPointManager
+
+
+class ServerThread(threading.Thread):
+
+    def __init__(self, app):
+        threading.Thread.__init__(self)
+        self.srv = make_server('0.0.0.0', 80, app, threaded=True)
+        self.ctx = app.app_context()
+        self.ctx.push()
+
+    def run(self):
+        print('starting server')
+        self.srv.serve_forever()
+
+    def shutdown(self):
+        print('shutting down server')
+        self.srv.shutdown()
+
 
 app = Flask(__name__)
 app.debug = True
+
+server = ServerThread(app)
+manager = AccessPointManager()
 
 
 @app.route('/portal')
@@ -35,13 +58,8 @@ def save_credentials():
 
     create_wpa_supplicant(ssid, wifi_key)
 
-    # Call set_ap_client_mode() in a thread otherwise the reboot will prevent
-    # the response from getting to the browser
-    def sleep_and_start_ap():
-        time.sleep(2)
-        set_ap_client_mode()
-    t = Thread(target=sleep_and_start_ap)
-    t.start()
+    # Kill flask and proceed to start the AP in client mode.
+    server.shutdown()
 
     return render_template('save_credentials.html', ssid=ssid)
 
@@ -57,12 +75,8 @@ def save_wpa_credentials():
     else:
         update_wpa(0, wpa_key)
 
-    def sleep_and_reboot_for_wpa():
-        time.sleep(2)
-        os.system('reboot')
-
-    t = Thread(target=sleep_and_reboot_for_wpa)
-    t.start()
+    # Kill flask and proceed to start the AP in client mode.
+    server.shutdown()
 
     config_hash = config_file_hash()
     return render_template('save_wpa_credentials.html', wpa_enabled=config_hash['wpa_enabled'], wpa_key=config_hash['wpa_key'])
@@ -83,7 +97,8 @@ def catch_all(path):
 ######## FUNCTIONS ##########
 
 def scan_wifi_networks():
-    iwlist_raw = subprocess.Popen(['iwlist', 'scan'], stdout=subprocess.PIPE)
+    iwlist_raw = subprocess.Popen(
+        ['iwlist', 'wlan0', 'scan'], stdout=subprocess.PIPE)
     ap_list, err = iwlist_raw.communicate()
     ap_array = []
 
@@ -119,17 +134,16 @@ def create_wpa_supplicant(ssid, wifi_key):
     temp_conf_file.close
 
     os.system('mv wpa_supplicant.conf.tmp /etc/wpa_supplicant/wpa_supplicant.conf')
+    os.system('wpa_cli -i wlan0 reconfigure')
 
+    print(subprocess.run(["killall", "dnsmasq"]))
+    print(subprocess.run(["killall", "hostapd"]))
 
-def set_ap_client_mode():
-    os.system('rm -f /etc/raspiwifi/host_mode')
-    os.system('rm /etc/cron.raspiwifi/aphost_bootstrapper')
-    os.system(
-        'cp /usr/lib/raspiwifi/reset_device/static_files/apclient_bootstrapper /etc/cron.raspiwifi/')
-    os.system('chmod +x /etc/cron.raspiwifi/apclient_bootstrapper')
-    os.system('mv /etc/dnsmasq.conf.original /etc/dnsmasq.conf')
-    os.system('mv /etc/dhcpcd.conf.original /etc/dhcpcd.conf')
-    os.system('reboot now')
+    # Remove the static ip address and re-enable wpa_supplicant.
+    dhcpcd_config = open('/etc/dhcpcd.conf', 'w')
+    dhcpcd_config.write('')
+    dhcpcd_config.close()
+    print(subprocess.run(["systemctl", "restart", "dhcpcd"]))
 
 
 def update_wpa(wpa_enabled, wpa_key):
@@ -161,11 +175,26 @@ def config_file_hash():
     return config_hash
 
 
+def stop_after_timeout():
+    time.sleep(5 * 60)
+    print("Timeout reached. Stopping server.")
+    server.shutdown()
+
+
 if __name__ == '__main__':
     config_hash = config_file_hash()
 
-    if config_hash['ssl_enabled'] == "1":
-        app.run(host='0.0.0.0', port=int(
-            config_hash['server_port']), ssl_context='adhoc')
-    else:
-        app.run(host='0.0.0.0', port=int(config_hash['server_port']))
+    # Stop the server after a timeout.
+    thread = threading.Thread(target=stop_after_timeout, args=())
+    thread.daemon = True                            # Daemonize thread
+    thread.start()                                  # Start the execution
+
+    print("starting access point in host mode")
+    manager.start_access_point()
+    print("starting flask")
+    server.start()
+    server.join()
+    print("stopped flask")
+    print("stopping host mode access point")
+    manager.stop_access_point()
+    print("stopped access point")
