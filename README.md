@@ -22,10 +22,25 @@ sudo apt install -y python3 python3-rpi.gpio python3-pip dnsmasq hostapd
 
 ```bash
 python3 -m pip install flask pyopenssl click
+python3 -m pip install Werkzeug
 ```
 
 ```bash
-cp portal.service /etc/systemd/system/
-systemctl enable portal.service
-systemctl start portal.service
+sudo su
+mkdir -p /etc/raspiwifi
+cat > /etc/raspiwifi/raspiwifi.conf <<EOF
+ssid_prefix=plantOS
+auto_config=0
+auto_config_delay=300
+ssl_enabled=0
+server_port=80
+wpa_enabled=0
+wpa_key=0
+EOF
+```
+
+```bash
+sudo ln -sv $PWD/portal.service /etc/systemd/system/portal.service
+sudo systemctl enable portal.service
+sudo systemctl start portal.service
 ```
