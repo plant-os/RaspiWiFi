@@ -13,9 +13,9 @@ class AccessPointManager:
     def start_access_point(self):
         print(subprocess.run(["killall", "dnsmasq"]))
         print(subprocess.run(["killall", "hostapd"]))
-        print(subprocess.run(["ifconfig", "wlan0", "down"]))
+        print(subprocess.run(["/usr/sbin/ifconfig", "wlan0", "down"]))
 
-        self.dnsmasq = subprocess.Popen(["dnsmasq", "--interface=wlan0",
+        self.dnsmasq = subprocess.Popen(["/usr/sbin/dnsmasq", "--interface=wlan0",
                                          "--address=/#/10.0.0.1", "--dhcp-range=10.0.0.10,10.0.0.15,12h"])
 
         file, name = tempfile.mkstemp()
@@ -37,7 +37,7 @@ class AccessPointManager:
         dhcpcd_config.close()
         print(subprocess.run(["systemctl", "restart", "dhcpcd"]))
 
-        self.hostapd = subprocess.Popen(["hostapd", "-d", name])
+        self.hostapd = subprocess.Popen(["/usr/sbin/hostapd", "-d", name])
 
     def stop_access_point(self):
         # TODO: Delete the hostapd config file.

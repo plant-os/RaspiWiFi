@@ -98,7 +98,7 @@ def catch_all(path):
 
 def scan_wifi_networks():
     iwlist_raw = subprocess.Popen(
-        ['iwlist', 'wlan0', 'scan'], stdout=subprocess.PIPE)
+        ['/usr/sbin/iwlist', 'wlan0', 'scan'], stdout=subprocess.PIPE)
     ap_list, err = iwlist_raw.communicate()
     ap_array = []
 
